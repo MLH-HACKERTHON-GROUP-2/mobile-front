@@ -1,0 +1,9 @@
+export type User = { id: string; name: string; role: string; email: string | null; phone: string | null; profileComplete: boolean };
+export type AuthPayload = { accessToken: string; refreshToken: string; user: User };
+export type Transaction = { id: string; type: 'TOPUP' | 'CONSULTATION' | 'MEDICATION'; direction: 'CREDIT' | 'DEBIT'; amount: number; createdAt: string };
+export type PrescriptionItem = { id: string; drugName: string; dosage: string; quantity: number; instructions: string | null; status: string; dispensedAt: string | null };
+export type Session = { id: string; status: string; startedAt: string; finalizedAt: string | null; hospital: { name: string }; vitals: { temperature: number | null; pulse: number | null; weightKg: number | null; recordedAt: string } | null; diagnosis: { notes: string } | null; prescription: { id: string; createdAt: string; items: PrescriptionItem[] } | null };
+export type Patient = { id: string; dob: string | null; sex: string | null; allergies: string | null; user: User; wallet: { id: string; balance: number; transactions: Transaction[] }; sessions: Session[] };
+export type QrToken = { token: string; qrCodeUrl: string; expiresAt: string };
+export const USER_FIELDS = 'id name role email phone profileComplete';
+export const PATIENT_QUERY = `query PatientDashboard { myPatientProfile { id dob sex allergies user { ${USER_FIELDS} } wallet { id balance transactions { id type direction amount createdAt } } sessions { id status startedAt finalizedAt hospital { name } vitals { temperature pulse weightKg recordedAt } diagnosis { notes } prescription { id createdAt items { id drugName dosage quantity instructions status dispensedAt } } } } }`;
