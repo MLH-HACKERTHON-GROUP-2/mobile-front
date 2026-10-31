@@ -15,6 +15,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notification, setNotification] = useState('');
+  const [subscriptionsAvailable, setSubscriptionsAvailable] = useState(false);
   const [qrToken, setQrToken] = useState<QrToken | null>(null);
   const [qrBusy, setQrBusy] = useState(false);
   const [qrError, setQrError] = useState('');
@@ -27,6 +28,14 @@ export function BackendProvider({ children }: { children: ReactNode }) {
     return storageQueue.current.catch(() => { setError('Session works, but could not be saved securely on this device.'); });
   }));
   useEffect(() => { let active = true; tokenStorage.read().then(async token => { if (token && active) await client.refresh(token); }).catch(error => { if (active) setError(errorMessage(error)); }).finally(() => { if (active) setReady(true); }); return () => { active = false; }; }, [client]);
+  useEffect(() => {
+    let active = true;
+    client.request<{ __schema: { subscriptionType: { fields: { name: string }[] } | null } }>('query BackendCapabilities { __schema { subscriptionType { fields { name } } } }', {}, false).then(data => {
+      const names = data.__schema.subscriptionType?.fields.map(field => field.name) ?? [];
+      if (active) setSubscriptionsAvailable(['sessionStarted', 'sessionFinalized', 'prescriptionReady', 'prescriptionDispensed', 'myPaymentEvents'].every(field => names.includes(field)));
+    }).catch(() => { if (active) setSubscriptionsAvailable(false); });
+    return () => { active = false; };
+  }, [client]);
   const reload = useCallback(async () => {
     if (!client.getSession()?.user.profileComplete) return;
     const requestGeneration = ++generation.current;
@@ -37,13 +46,13 @@ export function BackendProvider({ children }: { children: ReactNode }) {
   }, [client]);
   useEffect(() => { if (session?.user.profileComplete && session.user.role === 'PATIENT') void reload(); }, [session?.user.id, session?.user.profileComplete, session?.user.role, reload]);
   useEffect(() => {
-    if (!session?.user.profileComplete || session.user.role !== 'PATIENT') return;
+    if (!subscriptionsAvailable || !session?.user.profileComplete || session.user.role !== 'PATIENT') return;
     const socket = createClient({ url: API_URL.replace(/^http/, 'ws'), lazy: true, retryAttempts: 4, connectionParams: () => ({ authorization: `Bearer ${client.getSession()?.accessToken ?? ''}` }), on: { closed: event => { if (event && typeof event === 'object' && 'code' in event && (event.code === 4401 || event.code === 4403)) void client.refresh().catch(() => {}); } } });
     const fields = ['sessionStarted', 'sessionFinalized', 'prescriptionReady', 'prescriptionDispensed', 'myPaymentEvents'] as const;
     const labels = ['Your consultation has started.', 'Your consultation has been completed.', 'Your prescription is ready.', 'A prescription item was dispensed.', 'Your wallet has been updated.'];
-    const cleanup = fields.map((field, i) => socket.subscribe({ query: `subscription { ${field} { ${field === 'myPaymentEvents' ? 'walletTransactionId' : 'id'} } }` }, { next: result => { if (!result.errors?.length) { setNotification(labels[i]); void reload(); } }, error: () => {}, complete: () => {} }));
+    const cleanup = fields.map((field, i) => socket.subscribe({ query: `subscription { ${field} { ${field === 'myPaymentEvents' ? 'walletTransactionId success reason' : 'id'} } }` }, { next: result => { if (!result.errors?.length) { const payment = result.data?.myPaymentEvents as { success?: boolean; reason?: string } | undefined; setNotification(field === 'myPaymentEvents' && payment?.success === false ? errorMessage(new ApiError('Payment could not be completed. Open your wallet for details.', payment.reason ?? 'PAYMENT_FAILED')) : labels[i]); void reload(); } }, error: () => { setNotification('Live updates are unavailable. Use Refresh to check your latest records.'); }, complete: () => {} }));
     return () => { cleanup.forEach(dispose => dispose()); void socket.dispose(); };
-  }, [session?.accessToken, session?.user.profileComplete, session?.user.role, client, reload]);
+  }, [subscriptionsAvailable, session?.accessToken, session?.user.profileComplete, session?.user.role, client, reload]);
   const generateQr = useCallback(async () => {
     if (!client.getSession()) return;
     if (qrFlight.current) return qrFlight.current;
